@@ -224,6 +224,111 @@ body {
   font-weight: 600;
 }
 
+/* --- Overview header + inline range control --- */
+.overview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+/* --- KPI cards --- */
+.kpi-card .card-body {
+  padding: 1rem 1.1rem;
+}
+
+.kpi-title {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(33, 37, 41, 0.6);
+  font-weight: 600;
+}
+
+.kpi-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kpi-info {
+  cursor: help;
+  color: rgba(33, 37, 41, 0.35);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.kpi-info:hover {
+  color: var(--brand-teal);
+}
+
+.kpi-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+}
+
+.kpi-value {
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1.05;
+}
+
+.kpi-delta {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.kpi-delta.up {
+  color: #2f9e5f;
+}
+
+.kpi-delta.down {
+  color: #e2564f;
+}
+
+.kpi-spark {
+  height: 44px;
+  margin: 0.2rem 0;
+}
+
+.kpi-subtitle {
+  font-size: 0.78rem;
+  color: rgba(33, 37, 41, 0.6);
+  margin-top: 0.2rem;
+}
+
+.kpi-zone-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.kpi-zone-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.12rem 0;
+  font-size: 0.78rem;
+}
+
+.kpi-zone-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.kpi-zone-tooltip .tooltip-inner {
+  max-width: 260px;
+  text-align: left;
+}
+
 /* --- Sortable table headers --- */
 .sortable-th {
   cursor: pointer;

@@ -2,6 +2,14 @@
 .venv/
 .env
 __pycache__/
+.agents/
+.cursor/
+.clinerules/
+.github/
+.opencode/
+.windsurf/
+skills-lock.json
+AGENTS.md
 
 # Local database and Garmin auth token cache (never commit these)
 *.db

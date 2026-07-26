@@ -7,7 +7,7 @@ from app.auth import configure_auth
 from app.data import get_engine
 # Import pages at module load so their @callback definitions register with Dash
 # before the server starts serving the callback dependency graph.
-from app.pages import activities, glossary, overview, settings, training_load, weekly
+from app.pages import activities, glossary, overview, settings, weekly
 
 
 def _brand(app: Dash):
@@ -53,11 +53,9 @@ def create_app() -> Dash:
                         dbc.Nav([
                             dbc.NavLink("Overview", href="/", active="exact"),
                             dbc.NavLink("Weekly", href="/weekly", active="exact"),
-                            dbc.NavLink("Training Load", href="/training-load", active="exact"),
                             dbc.NavLink("Activities", href="/activities", active="exact"),
                             dbc.NavLink("Glossary", href="/glossary", active="exact"),
                             dbc.NavLink("Settings", href="/settings", active="exact"),
-                            dbc.NavLink("Sign out", href="/logout", external_link=True),
                         ], navbar=True, className="ms-auto"),
                         id="navbar-collapse",
                         is_open=False,
@@ -84,8 +82,6 @@ def create_app() -> Dash:
             return activities.layout()
         if pathname == "/weekly":
             return weekly.layout(engine)
-        if pathname == "/training-load":
-            return training_load.layout(engine)
         if pathname == "/glossary":
             return glossary.layout(engine)
         if pathname == "/settings":

@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import dash_bootstrap_components as dbc
-import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, callback, ctx, dcc, html, no_update
 from sqlalchemy.engine import Engine
 
 from app.components import (
     DEFAULT_RANGE_WEEKS,
-    STATIC_GRAPH_CONFIG,
     next_sort_state,
     range_selector,
     section_card,
@@ -18,25 +16,7 @@ from app.components import (
     sortable_table,
 )
 from app.data import get_engine, get_weekly_training
-from app.theme import SPORT_COLORS, make_figure, total_hover_trace
 from app.utils import meters_to_miles, meters_to_yards
-
-
-def _tss_by_sport_figure(weeks: list[dict]) -> go.Figure:
-    labels = [w["week_start"] for w in weeks]
-    traces = [
-        go.Bar(name="Run", x=labels, y=[w["run_tss"] or 0 for w in weeks], marker_color=SPORT_COLORS["run"]),
-        go.Bar(name="Bike", x=labels, y=[w["bike_tss"] or 0 for w in weeks], marker_color=SPORT_COLORS["bike"]),
-        go.Bar(name="Swim", x=labels, y=[w["swim_tss"] or 0 for w in weeks], marker_color=SPORT_COLORS["swim"]),
-        total_hover_trace(
-            labels,
-            [(w["run_tss"] or 0) + (w["bike_tss"] or 0) + (w["swim_tss"] or 0) for w in weeks],
-            "%{y:.0f}",
-        ),
-    ]
-    fig = make_figure(traces, height=360)
-    fig.update_layout(barmode="stack", yaxis_title="TSS", xaxis_title="Week")
-    return fig
 
 
 def _km_to_miles(distance_km: float | None) -> float:
@@ -102,7 +82,6 @@ def layout(engine: Engine):
             html.H1("Weekly", className="mt-2 mb-4"),
             dcc.Store(id="weekly-sort", data=DEFAULT_WEEKLY_SORT),
             range_selector("weekly-range"),
-            html.Div(id="weekly-graph-container"),
             html.Div(id="weekly-table-container"),
         ],
         fluid=True,
@@ -119,21 +98,6 @@ def update_weekly_sort(n_clicks, current):
     if not ctx.triggered or not ctx.triggered[0]["value"]:
         return no_update
     return next_sort_state(WEEKLY_COLUMNS, current, ctx.triggered_id["index"])
-
-
-@callback(
-    Output("weekly-graph-container", "children"),
-    Input("weekly-range", "value"),
-)
-def update_weekly_graph(range_weeks):
-    weeks = get_weekly_training(get_engine())
-    if not weeks:
-        return dbc.Alert("No training data yet.", color="info")
-    weeks = slice_weeks(weeks, range_weeks if range_weeks is not None else DEFAULT_RANGE_WEEKS)
-    return section_card(
-        "Weekly TSS by Sport",
-        dcc.Graph(figure=_tss_by_sport_figure(weeks), config=STATIC_GRAPH_CONFIG),
-    )
 
 
 # Sorting a column only re-renders this (small) table, so the chart above it is

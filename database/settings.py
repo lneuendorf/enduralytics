@@ -8,14 +8,27 @@ per-athlete thresholds. This module centralizes reading and upserting the single
 from __future__ import annotations
 
 import os
-from typing import Any
+from collections import defaultdict
+from datetime import date
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
 from .connection import session_scope
-from .models import AthleteSettings
+from .models import AthleteSettingEntry, AthleteSettings
 
 DEFAULT_ATHLETE_ID = "default"
+
+# The threshold fields that can be recorded as dated entries. These map directly
+# to the keyword arguments consumed by ``analytics.tss``.
+SETTING_FIELDS: tuple[str, ...] = (
+    "ftp_watts",
+    "run_threshold_pace_seconds_per_km",
+    "swim_css_pace_seconds_per_100m",
+    "threshold_hr",
+    "resting_hr",
+    "max_hr",
+)
 
 # Environment variable -> AthleteSettings field, with the parser to apply.
 _ENV_FIELD_MAP: dict[str, tuple[str, type]] = {
@@ -26,6 +39,7 @@ _ENV_FIELD_MAP: dict[str, tuple[str, type]] = {
     "ATHLETE_RESTING_HR": ("resting_hr", int),
     "ATHLETE_THRESHOLD_HR": ("threshold_hr", int),
 }
+
 
 
 def get_athlete_settings(
@@ -44,9 +58,15 @@ def athlete_tss_kwargs(
 ) -> dict[str, Any]:
     """Return the threshold keyword arguments consumed by ``analytics.tss``.
 
-    Provides a single settings-loading path shared by the weekly aggregator and
-    the processing pipeline so per-activity and weekly TSS always agree.
+    Resolves the values in effect *today* from the dated setting entries, falling
+    back to the legacy single-row settings when no dated entries exist. Kept as a
+    convenience for callers that do not need per-activity resolution.
     """
+    resolver = build_settings_resolver(session, athlete_id)
+    resolved = resolver(date.today())
+    if resolved:
+        return resolved
+
     settings = get_athlete_settings(session, athlete_id)
     if settings is None:
         return {}
@@ -57,6 +77,112 @@ def athlete_tss_kwargs(
         "threshold_hr": settings.threshold_hr,
         "resting_hr": settings.resting_hr,
     }
+
+
+def list_setting_entries(
+    session: Session, athlete_id: str = DEFAULT_ATHLETE_ID
+) -> list[AthleteSettingEntry]:
+    """Return every dated setting entry, newest effective date first."""
+    return (
+        session.query(AthleteSettingEntry)
+        .filter(AthleteSettingEntry.athlete_id == athlete_id)
+        .order_by(
+            AthleteSettingEntry.effective_date.desc(),
+            AthleteSettingEntry.created_at.desc(),
+        )
+        .all()
+    )
+
+
+def add_setting_entry(
+    session: Session,
+    field: str,
+    value: float,
+    effective_date: date,
+    athlete_id: str = DEFAULT_ATHLETE_ID,
+) -> AthleteSettingEntry:
+    """Record a dated value for one threshold ``field``."""
+    if field not in SETTING_FIELDS:
+        raise ValueError(f"Unknown setting field '{field}'")
+    entry = AthleteSettingEntry(
+        athlete_id=athlete_id,
+        field=field,
+        value=float(value),
+        effective_date=effective_date,
+    )
+    session.add(entry)
+    session.flush()
+    return entry
+
+
+def delete_setting_entry(
+    session: Session, entry_id: int, athlete_id: str = DEFAULT_ATHLETE_ID
+) -> bool:
+    """Delete a dated entry by id. Returns True when a row was removed."""
+    entry = (
+        session.query(AthleteSettingEntry)
+        .filter(
+            AthleteSettingEntry.id == entry_id,
+            AthleteSettingEntry.athlete_id == athlete_id,
+        )
+        .one_or_none()
+    )
+    if entry is None:
+        return False
+    session.delete(entry)
+    session.flush()
+    return True
+
+
+def build_settings_resolver(
+    session: Session, athlete_id: str = DEFAULT_ATHLETE_ID
+) -> Callable[[date], dict[str, Any]]:
+    """Return ``resolve(target_date) -> {field: value}`` for the dated entries.
+
+    For each field, ``resolve`` picks the most recent entry whose effective date
+    is on or before ``target_date`` (forward-looking). For dates that fall before
+    every recorded entry, it uses the earliest entry (backward-looking). Fields
+    with no entries are omitted, so the caller falls back to duration-based TSS.
+    """
+    entries = (
+        session.query(AthleteSettingEntry)
+        .filter(AthleteSettingEntry.athlete_id == athlete_id)
+        .order_by(
+            AthleteSettingEntry.effective_date.asc(),
+            AthleteSettingEntry.created_at.asc(),
+        )
+        .all()
+    )
+
+    by_field: dict[str, list[AthleteSettingEntry]] = defaultdict(list)
+    for entry in entries:
+        by_field[entry.field].append(entry)
+
+    # Legacy single-row settings act as an undated baseline: they apply to every
+    # date for any field that has no dated entries of its own.
+    legacy: dict[str, Any] = {}
+    settings_row = get_athlete_settings(session, athlete_id)
+    if settings_row is not None:
+        for field in SETTING_FIELDS:
+            value = getattr(settings_row, field, None)
+            if value is not None and field not in by_field:
+                legacy[field] = float(value)
+
+    def resolve(target_date: date) -> dict[str, Any]:
+        resolved: dict[str, Any] = dict(legacy)
+        for field, field_entries in by_field.items():
+            chosen = None
+            for entry in field_entries:  # ascending by effective date
+                if entry.effective_date <= target_date:
+                    chosen = entry
+                else:
+                    break
+            if chosen is None:
+                chosen = field_entries[0]  # backward-looking: earliest value
+            resolved[field] = chosen.value
+        return resolved
+
+    return resolve
 
 
 def upsert_athlete_settings(

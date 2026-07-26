@@ -9,22 +9,40 @@ from sqlalchemy.engine import Engine
 
 from app.components import (
     DEFAULT_RANGE_WEEKS,
+    RANGE_OPTIONS,
     STATIC_GRAPH_CONFIG,
-    range_selector,
     section_card,
     slice_weeks,
-    stat_card,
 )
 from app.data import get_engine, get_weekly_training
 from app.theme import COLORS, LOAD_COLORS, SPORT_COLORS, make_figure, total_hover_trace
 
 
-def _tsb_accent(tsb: float) -> str:
-    if tsb > 5:
-        return COLORS["green"]
-    if tsb < -10:
-        return COLORS["red"]
-    return COLORS["yellow"]
+FORM_ZONES = [
+    {"label": "Race-ready", "range": "+10 to +30", "color": COLORS["green"]},
+    {"label": "Fresh", "range": "0 to +10", "color": COLORS["blue"]},
+    {"label": "Maintenance", "range": "-10 to 0", "color": COLORS["yellow"]},
+    {"label": "Productive training", "range": "-10 to -30", "color": COLORS["orange"]},
+    {"label": "High fatigue", "range": "Below -30", "color": COLORS["red"]},
+]
+
+
+def _form_zone(tsb: float) -> dict:
+    if tsb >= 10:
+        return FORM_ZONES[0]
+    if tsb >= 0:
+        return FORM_ZONES[1]
+    if tsb >= -10:
+        return FORM_ZONES[2]
+    if tsb >= -30:
+        return FORM_ZONES[3]
+    return FORM_ZONES[4]
+
+
+def _rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r}, {g}, {b}, {alpha})"
 
 
 def _weekly_tss_figure(weeks: list[dict]) -> go.Figure:
@@ -78,6 +96,214 @@ def _load_figure(weeks: list[dict]) -> go.Figure:
     return fig
 
 
+def _tsb_color(v: float) -> str:
+    if v >= 10:
+        return COLORS["green"]
+    if v >= 0:
+        return COLORS["blue"]
+    if v >= -10:
+        return COLORS["yellow"]
+    if v >= -30:
+        return COLORS["orange"]
+    return COLORS["red"]
+
+
+def _form_figure(weeks: list[dict]) -> go.Figure:
+    labels = [w["week_start"] for w in weeks]
+    values = [w["tsb"] or 0 for w in weeks]
+    colors = [_tsb_color(v) for v in values]
+    traces = [go.Bar(name="TSB (Form)", x=labels, y=values, width=0.7, marker_color=colors, marker_line_width=0)]
+    fig = make_figure(traces, height=320, hovermode="x")
+    fig.update_layout(yaxis_title="TSB", xaxis_title="Week", showlegend=False)
+    fig.update_xaxes(type="category")
+    return fig
+
+
+def _sparkline(values: list[float], color: str) -> go.Figure:
+    fig = go.Figure(
+        go.Scatter(
+            x=list(range(len(values))),
+            y=values,
+            mode="lines",
+            line={"color": color, "width": 2, "shape": "spline"},
+            fill="tozeroy",
+            fillcolor=_rgba(color, 0.12),
+            hoverinfo="skip",
+        )
+    )
+    fig.update_layout(
+        height=44,
+        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        xaxis={"visible": False, "fixedrange": True},
+        yaxis={"visible": False, "fixedrange": True},
+    )
+    return fig
+
+
+def _delta(cur: float, prev: float | None, pct: bool = False):
+    if prev is None:
+        return None, None
+    diff = cur - prev
+    if pct:
+        if not prev:
+            return None, None
+        text = f"{abs(diff / prev * 100):.0f}%"
+    else:
+        text = f"{abs(diff):.0f}"
+    return diff >= 0, text
+
+
+def _delta_span(up, text):
+    if up is None:
+        return None
+    arrow = "\u2191" if up else "\u2193"
+    cls = "kpi-delta up" if up else "kpi-delta down"
+    return html.Span(f"{arrow} {text}", className=cls)
+
+
+def _metric_card(title, value, subtitle, accent, series, delta, info=None, info_id=None):
+    up, text = delta
+    if info:
+        header = html.Div(
+            [
+                html.Span(title, className="kpi-title"),
+                html.Span("\u24d8", id=info_id, className="kpi-info"),
+            ],
+            className="kpi-header",
+        )
+    else:
+        header = html.Div(title, className="kpi-title")
+    body = [
+        header,
+        html.Div(
+            [html.Span(value, className="kpi-value"), _delta_span(up, text)],
+            className="kpi-value-row",
+        ),
+        dcc.Graph(figure=_sparkline(series, accent), config=STATIC_GRAPH_CONFIG, className="kpi-spark"),
+        html.Div(subtitle, className="kpi-subtitle"),
+    ]
+    if info:
+        body.append(dbc.Tooltip(info, target=info_id, placement="bottom"))
+    return dbc.Card(
+        dbc.CardBody(body),
+        className="h-100 shadow-sm kpi-card",
+        style={"borderLeft": f"4px solid {accent}"},
+    )
+
+
+def _compare_card(title, value, cur, prev, accent):
+    up, text = _delta(cur, prev, pct=True)
+    subtitle = f"vs last week ({prev:.0f})" if prev is not None else "no prior week"
+    return dbc.Card(
+        dbc.CardBody(
+            [
+                html.Div(title, className="kpi-title"),
+                html.Div(
+                    [html.Span(value, className="kpi-value"), _delta_span(up, text)],
+                    className="kpi-value-row",
+                ),
+                html.Div(subtitle, className="kpi-subtitle mt-auto"),
+            ],
+            className="d-flex flex-column h-100",
+        ),
+        className="h-100 shadow-sm kpi-card",
+        style={"borderLeft": f"4px solid {accent}"},
+    )
+
+
+def _zone_tooltip():
+    rows = [
+        html.Div(
+            [
+                html.Span(className="kpi-zone-swatch", style={"backgroundColor": z["color"]}),
+                html.Span(f"{z['label']} — {z['range']}"),
+            ],
+            className="kpi-zone-row",
+        )
+        for z in FORM_ZONES
+    ]
+    return html.Div(rows)
+
+
+def _form_card(tsb, zone, info_id="overview-form-info"):
+    return dbc.Card(
+        dbc.CardBody(
+            [
+                html.Div(
+                    [
+                        html.Span("Form (TSB)", className="kpi-title"),
+                        html.Span("\u24d8", id=info_id, className="kpi-info"),
+                    ],
+                    className="kpi-header",
+                ),
+                html.Div(
+                    [
+                        html.Span(f"{tsb:+.0f}", className="kpi-value"),
+                        html.Span(
+                            zone["label"],
+                            className="kpi-zone-chip",
+                            style={"backgroundColor": _rgba(zone["color"], 0.18), "color": zone["color"]},
+                        ),
+                    ],
+                    className="kpi-value-row",
+                ),
+                html.Div(f"{zone['label']} zone ({zone['range']})", className="kpi-subtitle"),
+                dbc.Tooltip(_zone_tooltip(), target=info_id, placement="bottom", className="kpi-zone-tooltip"),
+            ]
+        ),
+        className="h-100 shadow-sm kpi-card",
+        style={"borderLeft": f"4px solid {zone['color']}"},
+    )
+
+
+def _kpi_strip(weeks: list[dict]):
+    latest = weeks[-1]
+    prev = weeks[-2] if len(weeks) > 1 else None
+    ctl = latest.get("ctl") or 0
+    atl = latest.get("atl") or 0
+    tsb = latest.get("tsb") or 0.0
+    tss = latest.get("total_tss") or 0
+    hours = latest.get("total_hours") or 0
+
+    # Scope each sparkline to its metric's load window. Data is weekly, so
+    # 42-day fitness ≈ last 6 weeks and 7-day fatigue ≈ the most recent week
+    # (floored to 2 points so a line can still render).
+    ctl_series = [w["ctl"] or 0 for w in weeks][-6:]
+    atl_series = [w["atl"] or 0 for w in weeks][-2:]
+
+    return dbc.Row(
+        [
+            dbc.Col(
+                _metric_card("Fitness (CTL)", f"{ctl:.0f}", "42-day load", LOAD_COLORS["ctl"],
+                             ctl_series, _delta(ctl, (prev or {}).get("ctl")),
+                             info="Sparkline shows the last 6 weeks (~42-day fitness load).",
+                             info_id="overview-ctl-info"),
+                lg=2, md=4, sm=6, className="mb-3",
+            ),
+            dbc.Col(
+                _metric_card("Fatigue (ATL)", f"{atl:.0f}", "7-day load", LOAD_COLORS["atl"],
+                             atl_series, _delta(atl, (prev or {}).get("atl")),
+                             info="Sparkline shows the most recent week (~7-day fatigue load).",
+                             info_id="overview-atl-info"),
+                lg=2, md=4, sm=6, className="mb-3",
+            ),
+            dbc.Col(_form_card(tsb, _form_zone(tsb)), lg=2, md=4, sm=6, className="mb-3"),
+            dbc.Col(
+                _compare_card("This Week TSS", f"{tss:.0f}", tss, (prev or {}).get("total_tss"), COLORS["primary"]),
+                lg=3, md=6, sm=6, className="mb-3",
+            ),
+            dbc.Col(
+                _compare_card("This Week Hours", f"{hours:.1f}", hours, (prev or {}).get("total_hours"), COLORS["teal"]),
+                lg=3, md=6, sm=6, className="mb-3",
+            ),
+        ],
+        className="g-3",
+    )
+
+
 def layout(engine: Engine):
     weeks = get_weekly_training(engine)
 
@@ -93,25 +319,28 @@ def layout(engine: Engine):
             fluid=True,
         )
 
-    latest = weeks[-1]
-    tsb = latest.get("tsb") or 0.0
-
-    cards = dbc.Row(
+    header = html.Div(
         [
-            dbc.Col(stat_card("Fitness (CTL)", f"{latest.get('ctl') or 0:.0f}", "42-day load", LOAD_COLORS["ctl"]), lg=2, md=4, sm=6, className="mb-3"),
-            dbc.Col(stat_card("Fatigue (ATL)", f"{latest.get('atl') or 0:.0f}", "7-day load", LOAD_COLORS["atl"]), lg=2, md=4, sm=6, className="mb-3"),
-            dbc.Col(stat_card("Form (TSB)", f"{tsb:+.0f}", "fitness − fatigue", _tsb_accent(tsb)), lg=2, md=4, sm=6, className="mb-3"),
-            dbc.Col(stat_card("This Week TSS", f"{latest.get('total_tss') or 0:.0f}", latest["week_start"], COLORS["primary"]), lg=3, md=6, sm=6, className="mb-3"),
-            dbc.Col(stat_card("This Week Hours", f"{latest.get('total_hours') or 0:.1f}", "training time", COLORS["teal"]), lg=3, md=6, sm=6, className="mb-3"),
+            html.H1("Overview", className="mb-0"),
+            html.Div(
+                dcc.Dropdown(
+                    id="overview-range",
+                    options=RANGE_OPTIONS,
+                    value=DEFAULT_RANGE_WEEKS,
+                    clearable=False,
+                    searchable=False,
+                    className="range-dropdown",
+                ),
+                style={"width": "150px"},
+            ),
         ],
-        className="g-3",
+        className="overview-header mt-2 mb-4",
     )
 
     return dbc.Container(
         [
-            html.H1("Overview", className="mt-2 mb-4"),
-            cards,
-            range_selector("overview-range"),
+            header,
+            html.Div(id="overview-kpis"),
             html.Div(id="overview-charts"),
         ],
         fluid=True,
@@ -131,15 +360,22 @@ def _charts(weeks: list[dict]):
                 dbc.Col(section_card("Fitness & Fatigue Trend", dcc.Graph(figure=_load_figure(weeks), config=STATIC_GRAPH_CONFIG)), lg=12),
             ]
         ),
+        dbc.Row(
+            [
+                dbc.Col(section_card("Form (TSB)", dcc.Graph(figure=_form_figure(weeks), config=STATIC_GRAPH_CONFIG)), lg=12),
+            ]
+        ),
     ]
 
 
 @callback(
+    Output("overview-kpis", "children"),
     Output("overview-charts", "children"),
     Input("overview-range", "value"),
 )
-def update_overview_charts(range_weeks):
+def update_overview(range_weeks):
     weeks = get_weekly_training(get_engine())
     if not weeks:
-        return dbc.Alert("No training data yet.", color="info")
-    return _charts(slice_weeks(weeks, range_weeks if range_weeks is not None else DEFAULT_RANGE_WEEKS))
+        return dbc.Alert("No training data yet.", color="info"), None
+    weeks = slice_weeks(weeks, range_weeks if range_weeks is not None else DEFAULT_RANGE_WEEKS)
+    return _kpi_strip(weeks), _charts(weeks)

@@ -103,6 +103,36 @@ class AthleteSettings(Base):
         }
 
 
+class AthleteSettingEntry(Base):
+    """A single dated threshold value.
+
+    Each row records that one threshold ``field`` took the given ``value`` as of
+    ``effective_date``. The processing pipeline resolves the value in effect for
+    any given activity date: the most recent entry on or before that date
+    (forward-looking), falling back to the earliest entry for dates that precede
+    every recorded value (backward-looking).
+    """
+
+    __tablename__ = "athlete_setting_entries"
+
+    id = Column(Integer, primary_key=True)
+    athlete_id = Column(String(64), nullable=False, default="default", index=True)
+    field = Column(String(48), nullable=False, index=True)
+    value = Column(Float, nullable=False)
+    effective_date = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "athlete_id": self.athlete_id,
+            "field": self.field,
+            "value": self.value,
+            "effective_date": self.effective_date.isoformat() if self.effective_date else None,
+        }
+
+
+
 class ActivityMetrics(Base):
     """Per-activity training-load values derived from raw activity data.
 

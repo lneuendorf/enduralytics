@@ -16,7 +16,7 @@ from analytics.tss import activity_tss, classify_discipline
 from analytics.weekly import aggregate_weekly_activity_summaries
 from database.connection import create_engine_from_url
 from database.models import Activity, ActivityMetrics, WeeklyTraining
-from database.settings import athlete_tss_kwargs
+from database.settings import build_settings_resolver
 
 # Weekly summary key -> WeeklyTraining column mapping (distances stored in km).
 _WEEKLY_COLUMN_MAP = {
@@ -71,7 +71,7 @@ def _metrics_fields(activity: Activity, settings: dict) -> dict | None:
 
 def process_activity_metrics(session: Session) -> int:
     """Upsert ActivityMetrics for every activity. Returns rows written."""
-    settings = athlete_tss_kwargs(session)
+    resolve_settings = build_settings_resolver(session)
 
     activities = session.query(Activity).all()
     existing = {
@@ -81,7 +81,8 @@ def process_activity_metrics(session: Session) -> int:
 
     written = 0
     for activity in activities:
-        fields = _metrics_fields(activity, settings)
+        target = activity.date.date() if activity.date else date.today()
+        fields = _metrics_fields(activity, resolve_settings(target))
         if fields is None:
             continue
 

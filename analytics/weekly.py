@@ -8,7 +8,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from database.models import Activity
-from database.settings import athlete_tss_kwargs
+from database.settings import build_settings_resolver
 
 from .atl import compute_atl
 from .ctl import compute_ctl
@@ -93,7 +93,7 @@ def _sample_week_load(
 
 def aggregate_weekly_activity_summaries(engine: Engine) -> list[dict[str, Any]]:
     with Session(engine) as session:
-        settings = athlete_tss_kwargs(session)
+        resolve_settings = build_settings_resolver(session)
         activities = (
             session.query(Activity)
             .filter(Activity.date.is_not(None))
@@ -107,6 +107,8 @@ def aggregate_weekly_activity_summaries(engine: Engine) -> list[dict[str, Any]]:
     for activity in activities:
         if not activity.date:
             continue
+
+        settings = resolve_settings(activity.date.date())
 
         week_start = _start_of_week(activity.date)
         bucket = grouped[week_start]
