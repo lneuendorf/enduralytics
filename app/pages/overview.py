@@ -208,6 +208,14 @@ def _sparkline(values: list[float], color: str) -> go.Figure:
             hoverinfo="skip",
         )
     )
+    # Zoom the y-axis to the data band (with padding) so small week-to-week
+    # changes are visible instead of being flattened against a 0 baseline.
+    nonzero = [v for v in values if v]
+    yaxis = {"visible": False, "fixedrange": True}
+    if nonzero:
+        lo, hi = min(nonzero), max(nonzero)
+        pad = max((hi - lo) * 0.6, hi * 0.02, 0.5)
+        yaxis["range"] = [lo - pad, hi + pad]
     fig.update_layout(
         height=44,
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
@@ -215,7 +223,7 @@ def _sparkline(values: list[float], color: str) -> go.Figure:
         plot_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
         xaxis={"visible": False, "fixedrange": True},
-        yaxis={"visible": False, "fixedrange": True},
+        yaxis=yaxis,
     )
     return fig
 
