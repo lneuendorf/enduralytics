@@ -19,24 +19,21 @@ from app.theme import COLORS, LOAD_COLORS, SPORT_COLORS, make_figure, total_hove
 
 
 FORM_ZONES = [
-    {"label": "Race-ready", "range": "+10 to +30", "color": COLORS["green"]},
-    {"label": "Fresh", "range": "0 to +10", "color": COLORS["blue"]},
-    {"label": "Maintenance", "range": "-10 to 0", "color": COLORS["yellow"]},
-    {"label": "Productive training", "range": "-10 to -30", "color": COLORS["orange"]},
-    {"label": "High fatigue", "range": "Below -30", "color": COLORS["red"]},
+    {"label": "Freshness", "range": "+5 to +25", "color": COLORS["blue"]},
+    {"label": "Grey Zone", "range": "-10 to +5", "color": COLORS["gray"]},
+    {"label": "Optimal Training", "range": "-30 to -10", "color": COLORS["orange"]},
+    {"label": "High Risk", "range": "Below -30", "color": COLORS["red"]},
 ]
 
 
 def _form_zone(tsb: float) -> dict:
-    if tsb >= 10:
+    if tsb >= 5:
         return FORM_ZONES[0]
-    if tsb >= 0:
-        return FORM_ZONES[1]
     if tsb >= -10:
-        return FORM_ZONES[2]
+        return FORM_ZONES[1]
     if tsb >= -30:
-        return FORM_ZONES[3]
-    return FORM_ZONES[4]
+        return FORM_ZONES[2]
+    return FORM_ZONES[3]
 
 
 def _rgba(hex_color: str, alpha: float) -> str:
@@ -79,43 +76,76 @@ def _weekly_hours_figure(weeks: list[dict]) -> go.Figure:
     return fig
 
 
-def _load_figure(weeks: list[dict]) -> go.Figure:
-    weeks_labels = [w["week_start"] for w in weeks]
-    traces = [
-        go.Scatter(
-            name="CTL (Fitness)", x=weeks_labels, y=[w["ctl"] or 0 for w in weeks],
-            mode="lines+markers", line={"color": LOAD_COLORS["ctl"], "width": 3},
-        ),
-        go.Scatter(
-            name="ATL (Fatigue)", x=weeks_labels, y=[w["atl"] or 0 for w in weeks],
-            mode="lines+markers", line={"color": LOAD_COLORS["atl"], "width": 2, "dash": "dot"},
-        ),
+def _weekly_tss_per_hour_figure(weeks: list[dict]) -> go.Figure:
+    labels = [w["week_start"] for w in weeks]
+    values = [
+        (w["total_tss"] / w["total_hours"]) if (w.get("total_tss") and w.get("total_hours")) else 0
+        for w in weeks
     ]
-    fig = make_figure(traces, height=340)
-    fig.update_layout(yaxis_title="Load", xaxis_title="Week")
+    traces = [
+        go.Bar(
+            name="TSS/hr", x=labels, y=values,
+            marker_color="#8f84b3", marker_line_width=0,
+            hovertemplate="%{y:.1f}<extra>TSS/hr</extra>",
+        )
+    ]
+    fig = make_figure(traces, height=360, hovermode="x")
+    fig.update_layout(yaxis_title="TSS / hr", xaxis_title="Week", showlegend=False)
+    # Zoom the y-axis to the data band so week-to-week variation is legible
+    # instead of being flattened against a 0 baseline.
+    nonzero = [v for v in values if v]
+    if nonzero:
+        lo, hi = min(nonzero), max(nonzero)
+        pad = max((hi - lo) * 0.4, hi * 0.01, 0.5)
+        fig.update_yaxes(range=[lo - pad, hi + pad])
     return fig
 
 
 def _tsb_color(v: float) -> str:
-    if v >= 10:
-        return COLORS["green"]
-    if v >= 0:
-        return COLORS["blue"]
-    if v >= -10:
-        return COLORS["yellow"]
-    if v >= -30:
-        return COLORS["orange"]
-    return COLORS["red"]
+    return _form_zone(v)["color"]
 
 
-def _form_figure(weeks: list[dict]) -> go.Figure:
+def _load_form_figure(weeks: list[dict]) -> go.Figure:
+    """Fitness/Fatigue lines (left Load axis) overlaid on Form bars (right TSB
+    axis). The right axis is symmetric so TSB=0 sits at the vertical center."""
     labels = [w["week_start"] for w in weeks]
-    values = [w["tsb"] or 0 for w in weeks]
-    colors = [_tsb_color(v) for v in values]
-    traces = [go.Bar(name="TSB (Form)", x=labels, y=values, width=0.7, marker_color=colors, marker_line_width=0)]
-    fig = make_figure(traces, height=320, hovermode="x")
-    fig.update_layout(yaxis_title="TSB", xaxis_title="Week", showlegend=False)
-    fig.update_xaxes(type="category")
+    ctl = [w["ctl"] or 0 for w in weeks]
+    atl = [w["atl"] or 0 for w in weeks]
+    tsb = [w["tsb"] or 0 for w in weeks]
+
+    tsb_bars = go.Bar(
+        name="TSB (Form)", x=labels, y=tsb,
+        marker_color=[_tsb_color(v) for v in tsb], marker_line_width=0,
+        yaxis="y2",
+    )
+    ctl_line = go.Scatter(
+        name="CTL (Fitness)", x=labels, y=ctl, mode="lines+markers",
+        line={"color": LOAD_COLORS["ctl"], "width": 3},
+    )
+    atl_line = go.Scatter(
+        name="ATL (Fatigue)", x=labels, y=atl, mode="lines+markers",
+        line={"color": LOAD_COLORS["atl"], "width": 2, "dash": "dot"},
+    )
+
+    # Bars added first so the fitness/fatigue lines render on top of them.
+    fig = make_figure([tsb_bars, ctl_line, atl_line], height=360)
+    m = (max((abs(v) for v in tsb), default=10) or 10) * 1.15
+    fig.update_layout(
+        yaxis_title="Load",
+        xaxis_title="Week",
+        margin={"l": 55, "r": 55, "t": 20, "b": 45},
+        yaxis2={
+            "title": {"text": "TSB (Form)", "font": {"color": COLORS["muted"]}},
+            "overlaying": "y",
+            "side": "right",
+            "range": [-m, m],
+            "zeroline": True,
+            "zerolinecolor": COLORS["grid"],
+            "showgrid": False,
+            "fixedrange": True,
+            "tickfont": {"color": COLORS["muted"]},
+        },
+    )
     return fig
 
 
@@ -353,16 +383,13 @@ def _charts(weeks: list[dict]):
             [
                 dbc.Col(section_card("Weekly TSS by Sport", dcc.Graph(figure=_weekly_tss_figure(weeks), config=STATIC_GRAPH_CONFIG)), lg=6),
                 dbc.Col(section_card("Weekly Hours by Sport", dcc.Graph(figure=_weekly_hours_figure(weeks), config=STATIC_GRAPH_CONFIG)), lg=6),
-            ]
+            ],
+            className="mb-3",
         ),
         dbc.Row(
             [
-                dbc.Col(section_card("Fitness & Fatigue Trend", dcc.Graph(figure=_load_figure(weeks), config=STATIC_GRAPH_CONFIG)), lg=12),
-            ]
-        ),
-        dbc.Row(
-            [
-                dbc.Col(section_card("Form (TSB)", dcc.Graph(figure=_form_figure(weeks), config=STATIC_GRAPH_CONFIG)), lg=12),
+                dbc.Col(section_card("Fitness, Fatigue & Form", dcc.Graph(figure=_load_form_figure(weeks), config=STATIC_GRAPH_CONFIG)), lg=6),
+                dbc.Col(section_card("Weekly TSS / Hour", dcc.Graph(figure=_weekly_tss_per_hour_figure(weeks), config=STATIC_GRAPH_CONFIG)), lg=6),
             ]
         ),
     ]

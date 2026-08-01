@@ -42,10 +42,11 @@ SPORT_COLORS = {
     "swim": COLORS["cyan"],
 }
 
-# Training-load series colors.
+# Training-load series colors. Kept distinct from the blue<->orange TSB
+# diverging scale so the fitness/fatigue lines never blend into the form bars.
 LOAD_COLORS = {
-    "ctl": COLORS["blue"],
-    "atl": COLORS["orange"],
+    "ctl": COLORS["green"],
+    "atl": COLORS["purple"],
     "tsb": COLORS["purple"],
 }
 
