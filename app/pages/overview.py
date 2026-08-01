@@ -83,9 +83,10 @@ def _weekly_tss_per_hour_figure(weeks: list[dict]) -> go.Figure:
         for w in weeks
     ]
     traces = [
-        go.Bar(
-            name="TSS/hr", x=labels, y=values,
-            marker_color="#8f84b3", marker_line_width=0,
+        go.Scatter(
+            name="TSS/hr", x=labels, y=values, mode="lines+markers",
+            line={"color": COLORS["gray"], "width": 4},
+            marker={"size": 7, "color": COLORS["gray"]},
             hovertemplate="%{y:.1f}<extra>TSS/hr</extra>",
         )
     ]
@@ -113,30 +114,71 @@ def _load_form_figure(weeks: list[dict]) -> go.Figure:
     atl = [w["atl"] or 0 for w in weeks]
     tsb = [w["tsb"] or 0 for w in weeks]
 
+    # Bars live on the base y-axis (TSB) while the lines live on the overlaying
+    # y2 axis. Plotly always paints overlaying-axis traces above base-axis ones,
+    # so putting the lines on y2 guarantees they render on top of the bars.
     tsb_bars = go.Bar(
         name="TSB (Form)", x=labels, y=tsb,
         marker_color=[_tsb_color(v) for v in tsb], marker_line_width=0,
-        yaxis="y2",
     )
     ctl_line = go.Scatter(
         name="CTL (Fitness)", x=labels, y=ctl, mode="lines+markers",
-        line={"color": LOAD_COLORS["ctl"], "width": 3},
+        line={"color": LOAD_COLORS["ctl"], "width": 4},
+        marker={"size": 7, "color": LOAD_COLORS["ctl"]},
+        yaxis="y2",
     )
     atl_line = go.Scatter(
         name="ATL (Fatigue)", x=labels, y=atl, mode="lines+markers",
-        line={"color": LOAD_COLORS["atl"], "width": 2, "dash": "dot"},
+        line={"color": LOAD_COLORS["atl"], "width": 3},
+        marker={"size": 6, "color": LOAD_COLORS["atl"]},
+        yaxis="y2",
     )
 
-    # Bars added first so the fitness/fatigue lines render on top of them.
-    fig = make_figure([tsb_bars, ctl_line, atl_line], height=360)
-    m = (max((abs(v) for v in tsb), default=10) or 10) * 1.15
+    # White "halo" traces drawn just under each colored line so it pops off the
+    # zone bands (Plotly has no SVG paint-order, so we fake the outline with a
+    # wider white line/marker beneath). Hidden from legend and hover.
+    def _halo(source: go.Scatter, width: int, marker_size: int) -> go.Scatter:
+        return go.Scatter(
+            x=source.x, y=source.y, mode="lines+markers",
+            line={"color": "white", "width": width, "dash": source.line.dash},
+            marker={"size": marker_size, "color": "white"},
+            hoverinfo="skip", showlegend=False, yaxis="y2",
+        )
+
+    ctl_halo = _halo(ctl_line, width=8, marker_size=11)
+    atl_halo = _halo(atl_line, width=7, marker_size=10)
+
+    # Draw order (bottom to top): bars, both halos, then ATL line, then CTL
+    # line on top. Halos sit above the bars/bands but under both colored lines,
+    # and CTL ends up above everything including its own halo.
+    fig = make_figure([tsb_bars, ctl_halo, atl_halo, atl_line, ctl_line], height=360)
+    # Floor the axis at ±30 so every zone band stays legible even when TSB is
+    # small; grow symmetrically past that when the data demands it.
+    m = max((max((abs(v) for v in tsb), default=0) or 0) * 1.15, 30)
+
+    # Shaded zone bands on the TSB axis so the color-to-zone mapping reads
+    # straight off the chart (matches ``FORM_ZONES`` / ``_form_zone`` cutoffs).
+    zone_bands = [
+        (5, m, COLORS["blue"]),      # Freshness (+5 and up)
+        (-10, 5, COLORS["gray"]),    # Grey Zone
+        (-30, -10, COLORS["orange"]),  # Optimal Training
+        (-m, -30, COLORS["red"]),    # High Risk
+    ]
+    zone_shapes = [
+        {
+            "type": "rect", "xref": "paper", "x0": 0, "x1": 1,
+            "yref": "y", "y0": lo, "y1": hi,
+            "fillcolor": _rgba(color, 0.40), "line": {"width": 0},
+            "layer": "below",
+        }
+        for lo, hi, color in zone_bands
+    ]
     fig.update_layout(
-        yaxis_title="Load",
         xaxis_title="Week",
         margin={"l": 55, "r": 55, "t": 20, "b": 45},
-        yaxis2={
+        shapes=zone_shapes,
+        yaxis={
             "title": {"text": "TSB (Form)", "font": {"color": COLORS["muted"]}},
-            "overlaying": "y",
             "side": "right",
             "range": [-m, m],
             "zeroline": True,
@@ -144,6 +186,11 @@ def _load_form_figure(weeks: list[dict]) -> go.Figure:
             "showgrid": False,
             "fixedrange": True,
             "tickfont": {"color": COLORS["muted"]},
+        },
+        yaxis2={
+            "title": "Load",
+            "overlaying": "y",
+            "side": "left",
         },
     )
     return fig
@@ -280,9 +327,10 @@ def _form_card(tsb, zone, info_id="overview-form-info"):
                     ],
                     className="kpi-value-row",
                 ),
-                html.Div(f"{zone['label']} zone ({zone['range']})", className="kpi-subtitle"),
+                html.Div(f"{zone['label']} zone ({zone['range']})", className="kpi-subtitle mt-auto"),
                 dbc.Tooltip(_zone_tooltip(), target=info_id, placement="bottom", className="kpi-zone-tooltip"),
-            ]
+            ],
+            className="d-flex flex-column h-100",
         ),
         className="h-100 shadow-sm kpi-card",
         style={"borderLeft": f"4px solid {zone['color']}"},
@@ -437,8 +485,8 @@ def layout(engine: Engine):
     return dbc.Container(
         [
             header,
-            _season_progress(get_season_progress(engine)),
             html.Div(id="overview-kpis"),
+            _season_progress(get_season_progress(engine)),
             html.Div(id="overview-charts"),
         ],
         fluid=True,

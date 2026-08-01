@@ -32,7 +32,7 @@ COLORS = {
     "gray": "#868e96",
     "grid": "#e9ecef",
     "text": "#212529",
-    "muted": "rgba(33, 37, 41, 0.6)",
+    "muted": "rgba(33, 37, 41, 1.0)",
 }
 
 # Per-discipline colors, reused across every chart and card.
@@ -45,7 +45,7 @@ SPORT_COLORS = {
 # Training-load series colors. Kept distinct from the blue<->orange TSB
 # diverging scale so the fitness/fatigue lines never blend into the form bars.
 LOAD_COLORS = {
-    "ctl": COLORS["green"],
+    "ctl": "#12263a",
     "atl": COLORS["purple"],
     "tsb": COLORS["purple"],
 }
