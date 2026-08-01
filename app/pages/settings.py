@@ -20,7 +20,9 @@ from app.data import clear_read_cache, get_engine
 from database.settings import (
     add_setting_entry,
     delete_setting_entry,
+    get_season_goals,
     list_setting_entries,
+    upsert_athlete_settings,
 )
 from pipeline.process_activities import process_all
 
@@ -220,6 +222,53 @@ def _entries_view(engine: Engine):
     return _entries_table(entries)
 
 
+def _season_goals_card(engine: Engine):
+    with Session(engine) as session:
+        goals = get_season_goals(session)
+    body = dbc.Row(
+        [
+            dbc.Col(
+                [
+                    dbc.Label("Annual TSS goal", className="fw-semibold"),
+                    dbc.Input(
+                        id="goal-annual-tss",
+                        type="number",
+                        placeholder="e.g. 25000",
+                        value=goals["annual_tss_goal"],
+                    ),
+                ],
+                md=6,
+            ),
+            dbc.Col(
+                [
+                    dbc.Label("Annual hours goal", className="fw-semibold"),
+                    dbc.Input(
+                        id="goal-annual-hours",
+                        type="number",
+                        placeholder="e.g. 500",
+                        value=goals["annual_hours_goal"],
+                    ),
+                ],
+                md=6,
+            ),
+            dbc.Col(
+                dbc.Button(
+                    "Save goals",
+                    id="save-season-goals",
+                    color="primary",
+                    size="sm",
+                    className="mt-2",
+                    n_clicks=0,
+                ),
+                width=12,
+            ),
+            dbc.Col(html.Div(id="season-goals-status", className="mt-2"), width=12),
+        ],
+        className="g-3",
+    )
+    return section_card("Season Goals", body)
+
+
 def layout(engine: Engine):
     cards = dbc.Row([_setting_card(field, meta) for field, meta in FIELD_DEFS.items()])
 
@@ -234,6 +283,7 @@ def layout(engine: Engine):
             ),
             cards,
             html.Div(id="settings-status", className="mt-2 mb-3"),
+            _season_goals_card(engine),
             section_card(
                 "Recorded values",
                 html.Div(_entries_view(engine), id="settings-entries"),
@@ -315,3 +365,37 @@ def modify_settings(add_clicks, del_clicks, values, value_ids, dates, date_ids):
         f"{counts['weekly_training']} weekly rollups."
     )
     return _entries_view(engine), dbc.Alert(message, color="success")
+
+
+@callback(
+    Output("season-goals-status", "children"),
+    Input("save-season-goals", "n_clicks"),
+    State("goal-annual-tss", "value"),
+    State("goal-annual-hours", "value"),
+    prevent_initial_call=True,
+)
+def save_season_goals(n_clicks, annual_tss, annual_hours):
+    if not n_clicks:
+        return no_update
+
+    def _parse(raw):
+        if raw in (None, ""):
+            return None
+        return float(raw)
+
+    try:
+        tss_goal = _parse(annual_tss)
+        hours_goal = _parse(annual_hours)
+    except (ValueError, TypeError):
+        return dbc.Alert("Goals must be numbers.", color="danger")
+
+    engine = get_engine()
+    with Session(engine) as session:
+        upsert_athlete_settings(
+            session,
+            annual_tss_goal=tss_goal,
+            annual_hours_goal=hours_goal,
+        )
+        session.commit()
+    clear_read_cache()
+    return dbc.Alert("Season goals saved.", color="success")

@@ -53,6 +53,19 @@ def get_athlete_settings(
     )
 
 
+def get_season_goals(
+    session: Session, athlete_id: str = DEFAULT_ATHLETE_ID
+) -> dict[str, float | None]:
+    """Return the annual TSS/hours planning targets (``None`` when unset)."""
+    settings = get_athlete_settings(session, athlete_id)
+    if settings is None:
+        return {"annual_tss_goal": None, "annual_hours_goal": None}
+    return {
+        "annual_tss_goal": settings.annual_tss_goal,
+        "annual_hours_goal": settings.annual_hours_goal,
+    }
+
+
 def athlete_tss_kwargs(
     session: Session, athlete_id: str = DEFAULT_ATHLETE_ID
 ) -> dict[str, Any]:

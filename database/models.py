@@ -85,6 +85,10 @@ class AthleteSettings(Base):
     threshold_hr = Column(Integer, nullable=True)
     hr_zones = Column(JSON, nullable=True)
 
+    # Season planning targets (total TSS / hours for the calendar year).
+    annual_tss_goal = Column(Float, nullable=True)
+    annual_hours_goal = Column(Float, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -100,6 +104,8 @@ class AthleteSettings(Base):
             "resting_hr": self.resting_hr,
             "threshold_hr": self.threshold_hr,
             "hr_zones": self.hr_zones,
+            "annual_tss_goal": self.annual_tss_goal,
+            "annual_hours_goal": self.annual_hours_goal,
         }
 
 

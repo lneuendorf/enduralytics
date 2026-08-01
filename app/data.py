@@ -10,15 +10,17 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import date
 from typing import Any
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from analytics.tss import classify_discipline
-from analytics.weekly import aggregate_weekly_activity_summaries
+from analytics.weekly import aggregate_weekly_activity_summaries, project_year_end
 from database.connection import create_engine_from_url
 from database.models import Activity, ActivityMetrics, WeeklyTraining
+from database.settings import get_season_goals
 
 _engine: Engine | None = None
 
@@ -145,3 +147,45 @@ def get_activities_with_metrics(
         )
     _cache_put(("activities", discipline, limit), results)
     return results
+
+
+def get_season_progress(engine: Engine, today: date | None = None) -> dict[str, Any]:
+    """Year-to-date TSS/hours totals with year-end projections vs annual goals.
+
+    Actuals sum the ``weekly_training`` rows whose week falls in the current
+    calendar year. Projections come from :func:`analytics.weekly.project_year_end`
+    using a trailing 8-week rate. Goals are read from the athlete settings row.
+    """
+    today = today or date.today()
+    year = today.year
+
+    weeks = get_weekly_training(engine)
+    year_weeks = [w for w in weeks if str(w["week_start"])[:4] == str(year)]
+    ytd_tss = sum(w.get("total_tss") or 0 for w in year_weeks)
+    ytd_hours = sum(w.get("total_hours") or 0 for w in year_weeks)
+
+    # Trailing per-week rate from the most recent (up to) 8 weeks of data.
+    recent = weeks[-8:] if weeks else []
+    tss_rate = (sum(w.get("total_tss") or 0 for w in recent) / len(recent)) if recent else 0.0
+    hours_rate = (sum(w.get("total_hours") or 0 for w in recent) / len(recent)) if recent else 0.0
+
+    day_of_year = today.timetuple().tm_yday
+    fraction_elapsed = day_of_year / 365.0
+    weeks_remaining = max((365 - day_of_year) / 7.0, 0.0)
+
+    tss_proj = project_year_end(ytd_tss, fraction_elapsed, tss_rate, weeks_remaining)
+    hours_proj = project_year_end(ytd_hours, fraction_elapsed, hours_rate, weeks_remaining)
+
+    with Session(engine) as session:
+        goals = get_season_goals(session)
+
+    return {
+        "year": year,
+        "ytd_tss": ytd_tss,
+        "ytd_hours": ytd_hours,
+        "tss_projection": tss_proj,
+        "hours_projection": hours_proj,
+        "annual_tss_goal": goals["annual_tss_goal"],
+        "annual_hours_goal": goals["annual_hours_goal"],
+        "fraction_elapsed": fraction_elapsed,
+    }

@@ -172,6 +172,23 @@ def aggregate_weekly_activity_summaries(engine: Engine) -> list[dict[str, Any]]:
     return summaries
 
 
+def project_year_end(
+    ytd: float,
+    fraction_elapsed: float,
+    trailing_rate: float,
+    weeks_remaining: float,
+) -> dict[str, float]:
+    """Project a calendar-year total two ways from year-to-date actuals.
+
+    ``linear`` extrapolates the whole-year average pace (naive; drifts near
+    season boundaries). ``trailing`` adds the recent per-week rate over the weeks
+    left, so it tracks current form rather than the season-long average.
+    """
+    linear = (ytd / fraction_elapsed) if fraction_elapsed > 0 else 0.0
+    trailing = ytd + trailing_rate * max(weeks_remaining, 0.0)
+    return {"linear": linear, "trailing": trailing}
+
+
 def get_recent_activities(engine: Engine, limit: int = 10) -> list[dict[str, Any]]:
     with Session(engine) as session:
         activities = (

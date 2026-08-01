@@ -14,7 +14,7 @@ from app.components import (
     section_card,
     slice_weeks,
 )
-from app.data import get_engine, get_weekly_training
+from app.data import get_engine, get_weekly_training, get_season_progress
 from app.theme import COLORS, LOAD_COLORS, SPORT_COLORS, make_figure, total_hover_trace
 
 
@@ -289,6 +289,73 @@ def _form_card(tsb, zone, info_id="overview-form-info"):
     )
 
 
+def _season_bar(label, actual, goal, projection, accent, unit, fmt):
+    if goal:
+        pct = min(actual / goal * 100.0, 100.0)
+        goal_text = f"{fmt(actual)} / {fmt(goal)} {unit}"
+    else:
+        pct = 0.0
+        goal_text = f"{fmt(actual)} {unit} \u2014 no goal set"
+
+    proj = projection["trailing"]
+    if goal:
+        ratio = proj / goal if goal else 0
+        if ratio >= 1.0:
+            chip_label, chip_color = "On pace", COLORS["green"]
+        elif ratio >= 0.9:
+            chip_label, chip_color = "Slightly behind", COLORS["teal"]
+        else:
+            chip_label, chip_color = "Behind", COLORS["orange"]
+        chip = html.Span(
+            f"{chip_label} \u00b7 proj {fmt(proj)}",
+            className="kpi-zone-chip",
+            style={"backgroundColor": _rgba(chip_color, 0.18), "color": chip_color},
+        )
+    else:
+        chip = None
+
+    return html.Div(
+        [
+            html.Div(
+                [html.Span(label, className="kpi-title"), chip],
+                className="kpi-value-row",
+            ),
+            dbc.Progress(
+                value=pct,
+                style={"height": "10px", "--bs-progress-bar-bg": accent},
+                className="my-2",
+            ),
+            html.Div(goal_text, className="kpi-subtitle"),
+        ],
+        className="mb-3",
+    )
+
+
+def _season_progress(progress: dict):
+    body = dbc.Row(
+        [
+            dbc.Col(
+                _season_bar(
+                    "TSS", progress["ytd_tss"], progress["annual_tss_goal"],
+                    progress["tss_projection"], COLORS["primary"], "TSS",
+                    lambda v: f"{v:,.0f}",
+                ),
+                md=6,
+            ),
+            dbc.Col(
+                _season_bar(
+                    "Hours", progress["ytd_hours"], progress["annual_hours_goal"],
+                    progress["hours_projection"], COLORS["teal"], "hrs",
+                    lambda v: f"{v:,.1f}",
+                ),
+                md=6,
+            ),
+        ],
+        className="g-3",
+    )
+    return section_card(f"{progress['year']} Season Progress", body)
+
+
 def _kpi_strip(weeks: list[dict]):
     latest = weeks[-1]
     prev = weeks[-2] if len(weeks) > 1 else None
@@ -370,6 +437,7 @@ def layout(engine: Engine):
     return dbc.Container(
         [
             header,
+            _season_progress(get_season_progress(engine)),
             html.Div(id="overview-kpis"),
             html.Div(id="overview-charts"),
         ],
